@@ -1,0 +1,20 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    pip_package_requirements:
+      - "requests"
+      - "google-auth"
+      - "google-auth-httplib2"
+      - "google-auth-oauthlib"
+      - "google-cloud"
+  tasks:
+    - name: Install pip requests library
+      pip:
+        name: "{{ item }}"
+        state: present
+        break_system_packages: true
+      with_items: "{{ pip_package_requirements }}"
+
+

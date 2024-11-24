@@ -1,0 +1,82 @@
+---
+- name: "Import PIP requirements playbook"
+  import_playbook: extras/requirements.yaml
+
+- name: Create an instance. Idempotent name for 1 hour
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    hourly_hash: "{{ ((inventory_hostname + ansible_date_time.year + ansible_date_time.weeknumber + ansible_date_time.hour) | hash('md5') | b64encode )[:-3] }}"
+    source_image: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+    machine_type: "e2-medium"
+    username: "{{ remote_user }}"
+    vm_purpose: test
+    #vm_name: "{{ username }}-{{ vm_purpose }}-{{ (hourly_hash[:5] | lower) }}"
+    vm_name: bonn-test-odvjz
+    disk_name: "{{ vm_name }}"
+    addr_name: "{{ vm_name }}"
+
+  tasks:
+    - name: enable all the Google Cloud APIs we use
+      google.cloud.gcp_serviceusage_service:
+        name: '{{ item }}'
+        project: '{{ gcp_project }}'
+        auth_kind: "{{ gcp_cred_kind }}"
+        state: present
+      loop:
+        - compute.googleapis.com
+        - container.googleapis.com
+        - dns.googleapis.com
+        - storage.googleapis.com
+
+    - name: print vm-name
+      debug:
+        msg: "vm-name is {{ vm_name }}"
+
+    - name: shutdown an instance
+      gcp_compute_instance:
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        name: "{{ vm_name }}"
+        project: "{{ gcp_project }}"
+        zone: "{{ zone }}"
+        machine_type: "{{ machine_type }}"
+        state: present
+        status: TERMINATED
+
+    - name: destroy an instance
+      gcp_compute_instance:
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        name: "{{ vm_name }}"
+        project: "{{ gcp_project }}"
+        zone: "{{ zone }}"
+        machine_type: "{{ machine_type }}"
+        state: absent
+
+    - name: destroy a disk
+      gcp_compute_disk:
+        name: "{{ disk_name }}"
+        size_gb: 50
+        source_image: "{{ source_image }}"
+        zone: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: absent
+      register: disk
+
+    - name: destroy an IP address
+      gcp_compute_address:
+        name: "{{ addr_name }}"
+        region: "{{ region }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: absent
+      register: address

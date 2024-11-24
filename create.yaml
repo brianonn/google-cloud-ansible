@@ -1,0 +1,114 @@
+---
+- name: "Import PIP requirements playbook"
+  import_playbook: extras/requirements.yaml
+
+- name: Create an instance. Idempotent name for 1 hour
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    hourly_hash: "{{ ((inventory_hostname + ansible_date_time.year + ansible_date_time.weeknumber + ansible_date_time.hour) | hash('md5') | b64encode )[:-3] }}"
+    source_image: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+    machine_type: "e2-medium"
+    username: "{{ remote_user }}"
+    vm_purpose: test
+    vm_name: "{{ username }}-{{ vm_purpose }}-{{ (hourly_hash[:5] | lower) }}"
+    disk_name: "{{ vm_name }}"
+    addr_name: "{{ vm_name }}"
+
+  tasks:
+    - name: enable all the Google Cloud APIs we use
+      google.cloud.gcp_serviceusage_service:
+        name: '{{ item }}'
+        project: '{{ gcp_project }}'
+        auth_kind: "{{ gcp_cred_kind }}"
+        state: present
+      loop:
+        - compute.googleapis.com
+        - container.googleapis.com
+        - dns.googleapis.com
+        - storage.googleapis.com
+
+    - name: print vm-name
+      debug:
+        msg: "vm-name is {{ vm_name }}"
+
+    - name: create a disk
+      gcp_compute_disk:
+        name: "{{ disk_name }}"
+        size_gb: 50
+        source_image: "{{ source_image }}"
+        zone: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: present
+      register: disk
+
+    - name: create an IP address
+      gcp_compute_address:
+        name: "{{ addr_name }}"
+        region: "{{ region }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: present
+      register: address
+
+    - name: print address
+      debug:
+        msg: "address is {{ address.address }}"
+
+    - name: create a instance
+      gcp_compute_instance:
+        state: present
+        name: "{{ vm_name }}"
+        machine_type: "{{ machine_type }}"
+        tags:
+          items:
+            - "{{ username }}"
+            - default-allow-http
+            - default-allow-https
+            - default-allow-ssh
+        disks:
+          - auto_delete: true
+            boot: true
+            source: "{{ disk }}"
+        network_interfaces:
+          - network: null # use default
+            access_configs:
+              - name: "External NAT"
+                nat_ip: "{{ address }}"
+                type: "ONE_TO_ONE_NAT"
+        zone: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+      register: instance
+
+    - name: Wait for SSH to come up
+      wait_for: host={{ address.address }} port=22 delay=5 sleep=5 timeout=120 state=started
+
+    - name: Add host to groupname
+      add_host: hostname={{ address.address }} groupname=gce_instance_ips
+
+    - name: Print vars
+      debug:
+        msg: "Host {{ vm_name }} has IP address {{ address.address }}"
+
+- name: Manage new instances
+  hosts: gce_instance_ips
+  connection: ssh
+  remote_user: "{{ remote_user }}"
+  become: True
+  roles:
+    - role: base
+      vars:
+        username: "{{ remote_user }}"
+    - chart_museum
+    - simple_web
+
+# -*- Mode: ansible -*-

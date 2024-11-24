@@ -1,0 +1,49 @@
+---
+- name: Set authorized key for remote user
+  ansible.posix.authorized_key:
+    user: "{{ username }}"
+    state: present
+    key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_rsa.pub') }}"
+
+- name: Disable password authentication for root
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    state: present
+    regexp: '^(#\s*)?PasswordAuthentication'
+    line: 'PasswordAuthentication No'
+  notify:
+    - Restart sshd
+
+- name: Disable ssh root login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    state: present
+    regexp: '^(#\s*)?PermitRootLogin'
+    line: 'PermitRootLogin No'
+  notify:
+    - Restart sshd
+
+- name: Update apt and install required system packages
+  apt:
+    pkg:
+      - tmux
+      - screen
+      - curl
+      - neovim
+      - fzf
+      - git
+      - ufw
+      - fail2ban
+    state: latest
+    update_cache: true
+
+- name: UFW - Allow SSH connections
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: UFW - Enable and deny by default
+  community.general.ufw:
+    state: enabled
+    default: deny
+

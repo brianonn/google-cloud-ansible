@@ -1,0 +1,26 @@
+---
+- name: Install nginx web server
+  apt: name=nginx update_cache=yes state=present
+
+- name: Slurp the webserver default sites file
+  slurp:
+    src: /etc/nginx/sites-enabled/default
+  register: sites
+
+- name: Find the webserver default root
+  set_fact:
+    webroot: "{{ sites.content | b64decode | regex_search('^[ \\t]*root[ \\t]+(.*)[ \\t]*;$', '\\1',multiline=True) | first }}"
+
+# - name: Print vars
+#   debug:
+#     msg: "The web root is {{ webroot }}"
+
+- name: "copy index.html"
+  copy: src=index.html dest="{{ webroot }}/index.html" mode=0644
+
+- name: UFW - Allow HTTP connections
+  community.general.ufw:
+    rule: allow
+    name: 'Nginx HTTP'
+
+# -*- Mode: ansible -*-
